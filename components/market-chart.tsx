@@ -1,15 +1,26 @@
 "use client"
 
-import { useState, useCallback } from "react"
-import { Line, LineChart, XAxis, YAxis, CartesianGrid, ReferenceDot } from "recharts"
+import { useState, useCallback, useRef, useEffect } from "react"
+import * as echarts from "echarts/core"
+import { LineChart } from "echarts/charts"
 import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  ChartLegend,
-  ChartLegendContent,
-  type ChartConfig,
-} from "@/components/ui/chart"
+  GridComponent,
+  TooltipComponent,
+  LegendComponent,
+  MarkPointComponent,
+  MarkLineComponent,
+} from "echarts/components"
+import { CanvasRenderer } from "echarts/renderers"
+
+echarts.use([
+  LineChart,
+  GridComponent,
+  TooltipComponent,
+  LegendComponent,
+  MarkPointComponent,
+  MarkLineComponent,
+  CanvasRenderer,
+])
 
 interface MarketLine {
   label: string
@@ -43,71 +54,22 @@ const COLOR_POSITIVE = "hsl(160, 60%, 40%)"
 const COLOR_NEGATIVE = "hsl(0, 60%, 55%)"
 const COLOR_NEUTRAL = "hsl(250, 50%, 55%)"
 
-const MAX_POINTS = 150
-
-function EventMarker({
-  cx,
-  cy,
-  index,
-  isActive,
-  onClick,
-  color,
-  chartBottom,
-}: {
-  cx?: number
-  cy?: number
-  index: number
-  isActive: boolean
-  onClick: () => void
-  color: string
-  chartBottom: number
-}) {
-  if (cx === undefined || cy === undefined) return null
-  const r = isActive ? 11 : 9
-
-  return (
-    <g onClick={onClick} style={{ cursor: "pointer" }}>
-      {/* Vertical dashed line from marker to x-axis — only when active */}
-      {isActive && (
-        <line
-          x1={cx}
-          y1={cy + r}
-          x2={cx}
-          y2={chartBottom}
-          stroke={color}
-          strokeDasharray="4 4"
-          strokeWidth={1}
-          opacity={0.5}
-        />
-      )}
-      {/* Outer ring */}
-      <circle
-        cx={cx}
-        cy={cy}
-        r={r}
-        fill="white"
-        stroke={color}
-        strokeWidth={2}
-      />
-      {/* Number label */}
-      <text
-        x={cx}
-        y={cy}
-        textAnchor="middle"
-        dominantBaseline="central"
-        fill={color}
-        fontSize={10}
-        fontWeight={600}
-        style={{ pointerEvents: "none", userSelect: "none" }}
-      >
-        {index + 1}
-      </text>
-    </g>
-  )
+function getMarkerColor(
+  marker: { direction: string; targetLabel: string },
+  labels: string[],
+  marketsLen: number
+): string {
+  const lineIdx = labels.indexOf(marker.targetLabel)
+  if (lineIdx >= 0 && marketsLen > 1) return COLORS[lineIdx % COLORS.length]
+  if (marker.direction === "up") return COLOR_POSITIVE
+  if (marker.direction === "down") return COLOR_NEGATIVE
+  return COLOR_NEUTRAL
 }
 
 export function MarketChart({ markets, events = [] }: { markets: MarketLine[]; events?: ChartEvent[] }) {
   const [activeEvent, setActiveEvent] = useState<number | null>(null)
+  const chartContainerRef = useRef<HTMLDivElement>(null)
+  const chartInstanceRef = useRef<echarts.ECharts | null>(null)
 
   const toggleEvent = useCallback((idx: number) => {
     setActiveEvent((prev) => (prev === idx ? null : idx))
@@ -115,6 +77,7 @@ export function MarketChart({ markets, events = [] }: { markets: MarketLine[]; e
 
   if (markets.length === 0) return null
 
+  // Merge all timestamps for event marker price reaction computation
   const allTimestamps = new Set<number>()
   for (const m of markets) {
     for (const pt of m.data) {
@@ -150,47 +113,27 @@ export function MarketChart({ markets, events = [] }: { markets: MarketLine[]; e
     }
   }
 
-  const downsampledData = chartData.length <= MAX_POINTS
-    ? chartData
-    : (() => {
-        const step = (chartData.length - 1) / (MAX_POINTS - 1)
-        const result: typeof chartData = []
-        for (let i = 0; i < MAX_POINTS; i++) {
-          result.push(chartData[Math.round(i * step)])
-        }
-        return result
-      })()
-
-  const config: ChartConfig = {}
-  for (let i = 0; i < markets.length; i++) {
-    config[markets[i].label] = {
-      label: markets[i].label,
-      color: COLORS[i % COLORS.length],
-    }
-  }
-
-  // Pre-compute event markers with their chart coordinates + price reaction stats
+  // Pre-compute event markers with price reaction stats
   const firstLabel = markets[0]?.label
-  const THREE_DAYS = 3 * 24 * 60 * 60 // seconds
+  const THREE_DAYS = 3 * 24 * 60 * 60
 
   const eventMarkers = events.map((event) => {
-    if (!firstLabel || downsampledData.length === 0) return null
+    if (!firstLabel || chartData.length === 0) return null
 
-    // Find closest downsampled point for chart placement
+    // Find closest data point
     let closestIdx = 0
-    let closestDist = Math.abs(downsampledData[0].t - event.t)
-    for (let i = 1; i < downsampledData.length; i++) {
-      const dist = Math.abs(downsampledData[i].t - event.t)
+    let closestDist = Math.abs(chartData[0].t - event.t)
+    for (let i = 1; i < chartData.length; i++) {
+      const dist = Math.abs(chartData[i].t - event.t)
       if (dist < closestDist) {
         closestIdx = i
         closestDist = dist
       }
     }
 
-    const closest = downsampledData[closestIdx]
+    const closest = chartData[closestIdx]
 
-    // Find which line to place the marker on
-    // For multi-line charts with an outcome tag, match to the correct line
+    // Match to correct line
     let targetLabel = firstLabel
     if (markets.length > 1 && event.outcome) {
       const outcomeLower = event.outcome.toLowerCase()
@@ -201,25 +144,22 @@ export function MarketChart({ markets, events = [] }: { markets: MarketLine[]; e
       if (matched) {
         targetLabel = matched
       } else {
-        // Outcome doesn't match any charted line — skip this event
         return null
       }
     }
 
     let yVal = closest[targetLabel] as number | undefined
-
-    // Fallback: search nearby points using the target label
     if (yVal === undefined) {
-      for (let offset = 1; offset < downsampledData.length; offset++) {
-        const before = downsampledData[closestIdx - offset]
-        const after = downsampledData[closestIdx + offset]
+      for (let offset = 1; offset < chartData.length; offset++) {
+        const before = chartData[closestIdx - offset]
+        const after = chartData[closestIdx + offset]
         if (before?.[targetLabel] !== undefined) { yVal = before[targetLabel] as number; break }
         if (after?.[targetLabel] !== undefined) { yVal = after[targetLabel] as number; break }
       }
     }
     if (yVal === undefined) return null
 
-    // Compute price reaction using full-resolution chartData (±3 days window)
+    // Price reaction in ±3 day window
     const windowStart = event.t - THREE_DAYS
     const windowEnd = event.t + THREE_DAYS
     const windowPoints = chartData.filter(
@@ -229,10 +169,9 @@ export function MarketChart({ markets, events = [] }: { markets: MarketLine[]; e
     let direction: "up" | "down" | "neutral" = "neutral"
     let priceChange: number | null = null
     let reactionTime: string | null = null
-    let earlyMover: string | null = null // "Polymarket moved X before news"
+    let earlyMover: string | null = null
 
     if (windowPoints.length >= 2) {
-      // Find min and max in the window
       let minPt = windowPoints[0], maxPt = windowPoints[0]
       for (const pt of windowPoints) {
         if ((pt[firstLabel] as number) < (minPt[firstLabel] as number)) minPt = pt
@@ -244,51 +183,43 @@ export function MarketChart({ markets, events = [] }: { markets: MarketLine[]; e
       const swing = maxVal - minVal
 
       if (swing >= 2) {
-        // Determine if it was an upswing or downswing based on which came first
         const isUpswing = minPt.t < maxPt.t
         direction = isUpswing ? "up" : "down"
         priceChange = isUpswing ? swing : -swing
 
-        // Compute reaction time
         const timeDiffSec = Math.abs(maxPt.t - minPt.t)
         if (timeDiffSec < 3600) {
           reactionTime = `${Math.max(1, Math.round(timeDiffSec / 60))}min`
         } else if (timeDiffSec < 86400) {
           reactionTime = `${Math.round(timeDiffSec / 3600)}hrs`
         } else {
-          const days = Math.round(timeDiffSec / 86400)
-          reactionTime = `${days}d`
+          reactionTime = `${Math.round(timeDiffSec / 86400)}d`
         }
 
-        // Check if price started moving before the event date
-        // The start of the move (min for upswing, max for downswing)
         const moveStartTs = isUpswing ? minPt.t : maxPt.t
         const leadTimeSec = event.t - moveStartTs
         if (leadTimeSec > 3600) {
-          // Price started moving before the event date
           if (leadTimeSec < 86400) {
             earlyMover = `${Math.round(leadTimeSec / 3600)}hrs before news`
           } else {
-            const days = Math.round(leadTimeSec / 86400)
-            earlyMover = `${days}d before news`
+            earlyMover = `${Math.round(leadTimeSec / 86400)}d before news`
           }
         }
       }
     }
 
-    // Fallback direction from neighboring downsampled points
     if (direction === "neutral") {
       let priceBefore: number | undefined
       let priceAfter: number | undefined
       for (let i = closestIdx - 1; i >= 0; i--) {
-        if (downsampledData[i][firstLabel] !== undefined) {
-          priceBefore = downsampledData[i][firstLabel] as number
+        if (chartData[i][firstLabel] !== undefined) {
+          priceBefore = chartData[i][firstLabel] as number
           break
         }
       }
-      for (let i = closestIdx + 1; i < downsampledData.length; i++) {
-        if (downsampledData[i][firstLabel] !== undefined) {
-          priceAfter = downsampledData[i][firstLabel] as number
+      for (let i = closestIdx + 1; i < chartData.length; i++) {
+        if (chartData[i][firstLabel] !== undefined) {
+          priceAfter = chartData[i][firstLabel] as number
           break
         }
       }
@@ -308,96 +239,194 @@ export function MarketChart({ markets, events = [] }: { markets: MarketLine[]; e
   }).filter((m): m is NonNullable<typeof m> => m !== null)
   .sort((a, b) => a.t - b.t)
 
+  // ── ECharts rendering ──────────────────────────────────────────────
+
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  useEffect(() => {
+    const container = chartContainerRef.current
+    if (!container) return
+
+    // Compute height from aspect ratio
+    const width = container.clientWidth
+    container.style.height = `${Math.round(width / 3)}px`
+
+    // Init or reuse chart instance
+    let chart = chartInstanceRef.current
+    if (!chart || chart.isDisposed()) {
+      chart = echarts.init(container)
+      chartInstanceRef.current = chart
+    }
+
+    // Build series
+    const series: echarts.EChartsCoreOption["series"] = markets.map((m, i) => {
+      const color = COLORS[i % COLORS.length]
+      const seriesData = [...m.data]
+        .sort((a, b) => a.t - b.t)
+        .map((pt) => [pt.t * 1000, Math.round(pt.p * 1000) / 10])
+
+      // Markers for this line
+      const lineMarkers = eventMarkers
+        .map((mk, globalIdx) => ({ mk, globalIdx }))
+        .filter(({ mk }) => mk.targetLabel === m.label)
+
+      const markPointData = lineMarkers.map(({ mk, globalIdx }) => {
+        const mkColor = getMarkerColor(mk, labels, markets.length)
+        return {
+          name: `event-${globalIdx}`,
+          coord: [mk.x * 1000, mk.y],
+          symbol: "circle",
+          symbolSize: activeEvent === globalIdx ? 22 : 18,
+          itemStyle: {
+            color: "#fff",
+            borderColor: mkColor,
+            borderWidth: 2,
+          },
+          label: {
+            show: true,
+            formatter: `${globalIdx + 1}`,
+            color: mkColor,
+            fontSize: 10,
+            fontWeight: 600 as const,
+          },
+        }
+      })
+
+      // Active marker vertical dashed line
+      const activeMarkerLine = lineMarkers.find(({ globalIdx }) => globalIdx === activeEvent)
+      const markLineConfig = activeMarkerLine
+        ? {
+            silent: true,
+            symbol: ["none", "none"],
+            lineStyle: {
+              type: "dashed" as const,
+              color: getMarkerColor(activeMarkerLine.mk, labels, markets.length),
+              width: 1,
+              opacity: 0.5,
+            },
+            data: [
+              [
+                { coord: [activeMarkerLine.mk.x * 1000, activeMarkerLine.mk.y] },
+                { coord: [activeMarkerLine.mk.x * 1000, 0] },
+              ],
+            ],
+          }
+        : undefined
+
+      return {
+        name: m.label,
+        type: "line" as const,
+        smooth: true,
+        showSymbol: false,
+        lineStyle: { width: 2 },
+        itemStyle: { color },
+        data: seriesData,
+        connectNulls: true,
+        markPoint: markPointData.length > 0 ? { data: markPointData } : undefined,
+        markLine: markLineConfig,
+      }
+    })
+
+    const option: echarts.EChartsCoreOption = {
+      grid: { left: 45, right: 16, top: 36, bottom: 24, containLabel: false },
+      xAxis: {
+        type: "time",
+        axisLine: { show: false },
+        axisTick: { show: false },
+        splitLine: { show: false },
+        axisLabel: {
+          formatter: (val: number) =>
+            new Date(val).toLocaleDateString("en-US", { month: "short" }),
+          hideOverlap: true,
+        },
+      },
+      yAxis: {
+        type: "value",
+        min: 0,
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: { formatter: "{value}%" },
+        splitLine: { lineStyle: { type: "dashed", opacity: 0.3 } },
+      },
+      tooltip: {
+        trigger: "axis",
+        backgroundColor: "rgba(255,255,255,0.95)",
+        borderColor: "#e5e7eb",
+        borderWidth: 1,
+        textStyle: { color: "#374151", fontSize: 12 },
+        formatter: (params: unknown) => {
+          const items = params as { seriesName: string; color: string; value: [number, number] }[]
+          if (!items?.length) return ""
+          const date = new Date(items[0].value[0]).toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+          })
+          let html = `<div style="font-weight:500;margin-bottom:4px">${date}</div>`
+          for (const item of items) {
+            html += `<div style="display:flex;align-items:center;gap:6px;margin:2px 0">
+              <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${item.color}"></span>
+              <span style="color:#6b7280">${item.seriesName}</span>
+              <span style="margin-left:auto;font-variant-numeric:tabular-nums">${item.value[1]}%</span>
+            </div>`
+          }
+          return html
+        },
+      },
+      legend: {
+        top: 0,
+        left: 0,
+        itemWidth: 12,
+        itemHeight: 8,
+        textStyle: { fontSize: 12 },
+        data: labels,
+      },
+      series,
+    }
+
+    chart.setOption(option, true)
+
+    // Click handler for markers
+    chart.off("click")
+    chart.on("click", (params: { componentType?: string; name?: string }) => {
+      if (params.componentType === "markPoint" && params.name) {
+        const idx = parseInt(params.name.replace("event-", ""), 10)
+        if (!isNaN(idx)) toggleEvent(idx)
+      }
+    })
+
+    // Resize observer
+    const ro = new ResizeObserver((entries) => {
+      const { width: w } = entries[0].contentRect
+      if (w > 0) {
+        container.style.height = `${Math.round(w / 3)}px`
+        chart?.resize()
+      }
+    })
+    ro.observe(container)
+
+    return () => {
+      ro.disconnect()
+    }
+  }, [markets, eventMarkers, activeEvent, labels, toggleEvent])
+
+  // Cleanup on unmount
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  useEffect(() => {
+    return () => {
+      chartInstanceRef.current?.dispose()
+      chartInstanceRef.current = null
+    }
+  }, [])
+
   return (
     <div>
-      <ChartContainer config={config} className="aspect-[3/1] w-full">
-        <LineChart data={downsampledData}>
-          <CartesianGrid vertical={false} strokeDasharray="3 3" />
-          <XAxis
-            dataKey="t"
-            tickFormatter={(t: number) =>
-              new Date(t * 1000).toLocaleDateString("en-US", { month: "short" })
-            }
-            tickLine={false}
-            axisLine={false}
-            interval="equidistantPreserveStart"
-            minTickGap={60}
-          />
-          <YAxis
-            tickFormatter={(v: number) => `${v}%`}
-            tickLine={false}
-            axisLine={false}
-            width={45}
-          />
-          <ChartTooltip
-            content={
-              <ChartTooltipContent
-                labelFormatter={(_, payload) => {
-                  const t = payload?.[0]?.payload?.t
-                  if (!t) return ""
-                  return new Date(t * 1000).toLocaleDateString("en-US", {
-                    month: "short",
-                    day: "numeric",
-                    year: "numeric",
-                  })
-                }}
-                formatter={(value) => `${value}%`}
-              />
-            }
-          />
-          <ChartLegend verticalAlign="top" align="left" content={<ChartLegendContent className="justify-start" />} />
-          {markets.map((m, i) => (
-            <Line
-              key={m.label}
-              type="monotone"
-              dataKey={m.label}
-              stroke={COLORS[i % COLORS.length]}
-              strokeWidth={2}
-              dot={false}
-              connectNulls
-            />
-          ))}
-          {eventMarkers.map((marker, idx) => {
-            // For multi-line charts with matched outcome, use the line's color
-            const lineIdx = labels.indexOf(marker.targetLabel)
-            const lineColor = lineIdx >= 0 && markets.length > 1
-              ? COLORS[lineIdx % COLORS.length]
-              : null
-            const color = lineColor
-              ?? (marker.direction === "up" ? COLOR_POSITIVE
-                : marker.direction === "down" ? COLOR_NEGATIVE
-                : COLOR_NEUTRAL)
-            return (
-              <ReferenceDot
-                key={`event-${idx}`}
-                x={marker.x}
-                y={marker.y}
-                shape={
-                  <EventMarker
-                    index={idx}
-                    isActive={activeEvent === idx}
-                    onClick={() => toggleEvent(idx)}
-                    color={color}
-                    chartBottom={500}
-                  />
-                }
-              />
-            )
-          })}
-        </LineChart>
-      </ChartContainer>
+      {/* ECharts canvas container */}
+      <div ref={chartContainerRef} className="w-full" style={{ aspectRatio: "3/1" }} />
 
       {/* Event popover card */}
       {activeEvent !== null && eventMarkers[activeEvent] && (() => {
         const marker = eventMarkers[activeEvent]
-        const lineIdx = labels.indexOf(marker.targetLabel)
-        const lineColor = lineIdx >= 0 && markets.length > 1
-          ? COLORS[lineIdx % COLORS.length]
-          : null
-        const color = lineColor
-          ?? (marker.direction === "up" ? COLOR_POSITIVE
-            : marker.direction === "down" ? COLOR_NEGATIVE
-            : COLOR_NEUTRAL)
+        const color = getMarkerColor(marker, labels, markets.length)
         const hasPrev = activeEvent > 0
         const hasNext = activeEvent < eventMarkers.length - 1
         return (
@@ -420,7 +449,7 @@ export function MarketChart({ markets, events = [] }: { markets: MarketLine[]; e
                     {marker.outcome}
                   </span>
                 )}
-                {marker.direction !== "neutral" && !lineColor && (
+                {marker.direction !== "neutral" && markets.length <= 1 && (
                   <span className="text-[10px]" style={{ color }}>
                     {marker.direction === "up" ? "\u2191" : "\u2193"}
                   </span>
@@ -448,7 +477,7 @@ export function MarketChart({ markets, events = [] }: { markets: MarketLine[]; e
                     className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
                     style={{
                       backgroundColor: marker.direction === "up" ? "hsl(160, 60%, 95%)" : marker.direction === "down" ? "hsl(0, 60%, 95%)" : "hsl(250, 40%, 95%)",
-                      color,
+                      color: marker.direction === "up" ? COLOR_POSITIVE : marker.direction === "down" ? COLOR_NEGATIVE : COLOR_NEUTRAL,
                     }}
                   >
                     {marker.direction === "up" ? "\u2191" : "\u2193"} {marker.priceChange > 0 ? "+" : ""}{Math.round(marker.priceChange)}pts
@@ -500,35 +529,11 @@ export function MarketChart({ markets, events = [] }: { markets: MarketLine[]; e
         )
       })()}
 
-      {/* Event legend when markers are visible */}
+      {/* Event count hint when markers visible but none selected */}
       {eventMarkers.length > 0 && activeEvent === null && (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {eventMarkers.map((marker, idx) => {
-            const lineIdx = labels.indexOf(marker.targetLabel)
-            const lineColor = lineIdx >= 0 && markets.length > 1
-              ? COLORS[lineIdx % COLORS.length]
-              : null
-            const color = lineColor
-              ?? (marker.direction === "up" ? COLOR_POSITIVE
-                : marker.direction === "down" ? COLOR_NEGATIVE
-                : COLOR_NEUTRAL)
-            return (
-              <button
-                key={idx}
-                onClick={() => setActiveEvent(idx)}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs border hover:bg-muted/50 transition-colors cursor-pointer"
-              >
-                <span
-                  className="size-4 rounded-full flex items-center justify-center text-[9px] font-semibold text-white shrink-0"
-                  style={{ backgroundColor: color }}
-                >
-                  {idx + 1}
-                </span>
-                <span className="text-muted-foreground truncate max-w-[180px]">{marker.title}</span>
-              </button>
-            )
-          })}
-        </div>
+        <p className="mt-1.5 text-xs text-muted-foreground/60">
+          {eventMarkers.length} events plotted &middot; click a marker to view details
+        </p>
       )}
     </div>
   )

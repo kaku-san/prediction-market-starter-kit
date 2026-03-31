@@ -4,7 +4,7 @@ import { useState, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Spinner } from "@/components/ui/spinner"
-import type { MarketNews as MarketNewsData, NewsSource } from "@/hooks/use-market-news"
+import type { MarketNews as MarketNewsData } from "@/hooks/use-market-news"
 import type { Market, PricePoint } from "@/lib/gamma"
 
 function formatDate(d: Date): string {
@@ -117,36 +117,6 @@ function computeMarketSummary(
   return { priceMove, priceSummary, fromDate, toDate }
 }
 
-function renderAnswer(answer: string, sources: NewsSource[]) {
-  // Replace inline citation markers [1], [2] etc. with clickable links
-  const parts = answer.split(/(\[\d+\])/)
-  return parts.map((part, i) => {
-    const match = part.match(/^\[(\d+)\]$/)
-    if (match) {
-      const idx = parseInt(match[1], 10) - 1
-      const source = sources[idx]
-      if (source?.url) {
-        return (
-          <a
-            key={i}
-            href={source.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-violet-600 dark:text-violet-400 hover:underline text-xs align-super"
-          >
-            [{match[1]}]
-          </a>
-        )
-      }
-      return (
-        <span key={i} className="text-muted-foreground text-xs align-super">
-          [{match[1]}]
-        </span>
-      )
-    }
-    return <span key={i}>{part}</span>
-  })
-}
 
 interface NewsState {
   news: MarketNewsData | null
@@ -244,35 +214,22 @@ export function MarketNews({
         </div>
       )}
 
-      {news && (
-        <div className="space-y-3">
-          <div className="text-sm leading-relaxed whitespace-pre-line">
-            {renderAnswer(news.answer, news.sources)}
-          </div>
+      {news && (() => {
+        // Extract just the overview paragraph (before the first dated event)
+        const overviewEnd = news.answer.search(/(?:\[|\*{0,2})\d{4}-\d{2}-\d{2}/)
+        const overview = overviewEnd > 0
+          ? news.answer.slice(0, overviewEnd).replace(/\*+/g, "").replace(/\[\d+\]/g, "").trim()
+          : news.answer.slice(0, 300).replace(/\*+/g, "").replace(/\[\d+\]/g, "").trim()
 
-          {news.sources.length > 0 && (
-            <details className="group">
-              <summary className="text-xs font-medium text-muted-foreground cursor-pointer hover:text-foreground">
-                {news.sources.length} sources
-              </summary>
-              <ul className="mt-2 space-y-1.5">
-                {news.sources.map((source, i) => (
-                  <li key={i} className="text-xs">
-                    <a
-                      href={source.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-violet-600 dark:text-violet-400 hover:underline"
-                    >
-                      [{i + 1}] {source.name}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )}
-        </div>
-      )}
+        return (
+          <div>
+            <p className="text-sm text-muted-foreground leading-relaxed">{overview}</p>
+            {news.sources.length > 0 && (
+              <p className="text-xs text-muted-foreground/60 mt-2">{news.sources.length} sources &middot; click chart markers for details</p>
+            )}
+          </div>
+        )
+      })()}
     </Card>
   )
 }
