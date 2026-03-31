@@ -31,7 +31,9 @@ export function usePositionBalance(address: string | undefined, tokenId: string 
     if (!address || !tokenId) return
 
     let cancelled = false
-    setLoading(true)
+    queueMicrotask(() => {
+      if (!cancelled) setLoading(true)
+    })
 
     client
       .readContract({

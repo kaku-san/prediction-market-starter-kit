@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation"
 import type { Metadata } from "next"
 import { getEvents, getPriceHistory } from "@/lib/gamma"
-import { MarketChart } from "@/components/market-chart"
+import { MarketInsights } from "@/components/market-insights"
 import { HugeiconsIcon } from "@hugeicons/react"
 import { SourceCodeIcon, Link01Icon, Bookmark01Icon, ArrowDown01Icon } from "@hugeicons/core-free-icons"
 import { Button } from "@/components/ui/button"
@@ -18,7 +18,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const event = events[0]
   if (!event) return { title: "Event not found" }
   return {
-    title: `${event.title} | Prediction Market Starter Kit`,
+    title: `${event.title} | Kakupoly`,
     description: event.description?.slice(0, 160),
   }
 }
@@ -64,6 +64,10 @@ export default async function EventPage({ params }: Props) {
       })
     )
   ).filter((m): m is NonNullable<typeof m> => m !== null)
+
+  // Use the first market and its price history for the news section
+  const primaryMarket = sortedMarkets[0] ?? null
+  const primaryPriceHistory = chartMarkets[0]?.data ?? []
 
   const firstTag = tags[0]
   const relatedEvents = firstTag
@@ -112,11 +116,14 @@ export default async function EventPage({ params }: Props) {
           </div>
         </div>
 
-        {chartMarkets.length > 0 && (
-          <div className="mt-6">
-            <MarketChart markets={chartMarkets} />
-          </div>
-        )}
+        <MarketInsights
+          chartMarkets={chartMarkets}
+          primaryMarket={primaryMarket}
+          primaryPriceHistory={primaryPriceHistory}
+          createdAt={event.createdAt}
+          eventTitle={event.title}
+          marketLabels={chartMarkets.map((m) => m.label)}
+        />
 
         <Collapsible className="my-2" defaultOpen>
           <Card className="p-3.5">

@@ -15,6 +15,8 @@ import {
 } from "@/components/ui/dropdown-menu"
 import Avatar from "boring-avatars"
 import { useUsdcBalance } from "@/hooks/use-usdc-balance"
+import { useReadyTimeout } from "@/hooks/use-ready-timeout"
+import { usePrivyConfig } from "@/components/privy-provider"
 import { deriveSafeAddress } from "@/lib/polymarket/relayer"
 
 function UserAvatar({ seed }: { seed: string }) {
@@ -26,12 +28,40 @@ function UserAvatar({ seed }: { seed: string }) {
 }
 
 export function AuthButton() {
+  const { enabled } = usePrivyConfig()
+
+  if (!enabled) {
+    return (
+      <Button size="sm" variant="outline" disabled title="Add NEXT_PUBLIC_PRIVY_APP_ID to enable sign in">
+        Browse Only
+      </Button>
+    )
+  }
+
+  return <PrivyAuthButton />
+}
+
+function PrivyAuthButton() {
   const { ready, authenticated, login, logout, user } = usePrivy()
+  const timedOut = useReadyTimeout(ready)
   const walletAddr = user?.wallet?.address
   const safeAddress = walletAddr ? deriveSafeAddress(walletAddr) : undefined
   const { balance, loading: balanceLoading } = useUsdcBalance(safeAddress)
 
   if (!ready) {
+    if (timedOut) {
+      return (
+        <Button
+          size="sm"
+          variant="outline"
+          disabled
+          title="Privy did not initialize. Check NEXT_PUBLIC_PRIVY_APP_ID and the allowed origins for this local URL."
+        >
+          Auth Unavailable
+        </Button>
+      )
+    }
+
     return (
       <Button size="sm" disabled>
         <Spinner />

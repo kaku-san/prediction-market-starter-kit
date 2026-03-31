@@ -15,7 +15,7 @@ export function Navbar() {
             <path d="M71.1324 24C71.1324 36.4264 61.1574 46.5 48.8529 46.5C36.5484 46.5 26.5735 36.4264 26.5735 24C26.5735 11.5736 36.5484 1.5 48.8529 1.5C61.1574 1.5 71.1324 11.5736 71.1324 24Z" className="fill-foreground/50" />
             <path d="M36.6705 42.8416C42.8109 38.8239 46.8676 31.8858 46.8676 24C46.8676 16.1144 42.8109 9.17614 36.6705 5.15854C30.5904 9.17614 26.5735 16.1144 26.5735 24C26.5735 31.8858 30.5904 38.8239 36.6705 42.8416Z" className="fill-foreground" />
           </svg>
-          <span className="font-semibold tracking-tight">Predict</span>
+          <span className="font-semibold tracking-tight">Kakupoly</span>
         </Link>
 
         <div className="flex-1 flex justify-center">

@@ -14,9 +14,71 @@ import { parsePrices } from "@/lib/prices"
 import { useTrading } from "@/hooks/use-trading"
 import { useUsdcBalance } from "@/hooks/use-usdc-balance"
 import { usePositionBalance } from "@/hooks/use-position-balance"
+import { useReadyTimeout } from "@/hooks/use-ready-timeout"
+import { usePrivyConfig } from "@/components/privy-provider"
 import { deriveSafeAddress, createEthersSigner, transferToSafe } from "@/lib/polymarket/relayer"
 
 export function TradeCard({
+  markets,
+  selectedMarketId,
+  selectedSide,
+}: {
+  markets: Market[]
+  selectedMarketId?: string
+  selectedSide?: "yes" | "no"
+}) {
+  const { enabled } = usePrivyConfig()
+
+  if (!enabled) {
+    return (
+      <TradeCardPlaceholder message="Trading is disabled until NEXT_PUBLIC_PRIVY_APP_ID is configured." />
+    )
+  }
+
+  return (
+    <PrivyTradeCard
+      markets={markets}
+      selectedMarketId={selectedMarketId}
+      selectedSide={selectedSide}
+    />
+  )
+}
+
+function PrivyTradeCard({
+  markets,
+  selectedMarketId,
+  selectedSide,
+}: {
+  markets: Market[]
+  selectedMarketId?: string
+  selectedSide?: "yes" | "no"
+}) {
+  const { ready } = usePrivy()
+  const timedOut = useReadyTimeout(ready)
+
+  if (!ready) {
+    return (
+      <TradeCardPlaceholder
+        message={
+          timedOut
+            ? "Privy did not initialize. Check NEXT_PUBLIC_PRIVY_APP_ID and the allowed origins for this local URL."
+            : "Initializing sign-in..."
+        }
+        pending={!timedOut}
+      />
+    )
+  }
+
+  return (
+    <TradeCardReady
+      markets={markets}
+      selectedMarketId={selectedMarketId}
+      selectedSide={selectedSide}
+    />
+  )
+}
+
+function TradeCardReady({
   markets,
   selectedMarketId,
   selectedSide,
@@ -346,6 +408,32 @@ export function TradeCard({
             {tab === "buy" ? "Buy" : "Sell"} {markets.length > 1 ? `${label} — ` : ""}{side === "yes" ? "Yes" : "No"}!
           </>
         )}
+      </Button>
+    </div>
+  )
+}
+
+function TradeCardPlaceholder({ message, pending = false }: { message: string; pending?: boolean }) {
+  return (
+    <div className="rounded-2xl border bg-card p-5">
+      <div className="flex items-center justify-between">
+        <div className="flex border-b">
+          <button className="px-4 pb-2 text-sm font-medium border-b-2 border-primary text-primary">
+            Buy
+          </button>
+          <button className="px-4 pb-2 text-sm font-medium border-b-2 border-transparent text-muted-foreground">
+            Sell
+          </button>
+        </div>
+        <span className="text-xs text-muted-foreground">Market</span>
+      </div>
+
+      <div className="mt-6 rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+        {message}
+      </div>
+
+      <Button className="mt-4 w-full" disabled>
+        {pending ? <Spinner className="size-4" /> : "Trading Unavailable"}
       </Button>
     </div>
   )
