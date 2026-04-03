@@ -9,10 +9,15 @@ const POLYGON_RPC_URL = process.env.NEXT_PUBLIC_POLYGON_RPC_URL || "https://poly
 
 function PrivyProviderInner({ children }: { children: React.ReactNode }) {
   const { resolvedTheme } = useTheme()
+  const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID
+
+  if (!appId) {
+    return <>{children}</>
+  }
 
   return (
     <BasePrivyProvider
-      appId={process.env.NEXT_PUBLIC_PRIVY_APP_ID || ""}
+      appId={appId}
       config={{
         appearance: {
           theme: resolvedTheme === "dark" ? "dark" : "light",
