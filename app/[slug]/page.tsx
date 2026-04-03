@@ -113,11 +113,17 @@ export default async function EventPage({ params }: Props) {
           </div>
         </div>
 
-        <ChartLiveToggle
-          chartMarkets={chartMarkets}
-          isBasketball={isBasketballEvent(event.title, tags)}
-          {...(extractTeams(event.title) ?? {})}
-        />
+        {(() => {
+          const teams = extractTeams(event.title)
+          return (
+            <ChartLiveToggle
+              chartMarkets={chartMarkets}
+              isBasketball={isBasketballEvent(event.title, tags)}
+              homeTeam={teams?.home}
+              awayTeam={teams?.away}
+            />
+          )
+        })()}
 
         <Collapsible className="my-2" defaultOpen>
           <Card className="p-3.5">
