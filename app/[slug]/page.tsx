@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation"
 import type { Metadata } from "next"
 import { getEvents, getPriceHistory } from "@/lib/gamma"
+import { MarketInsights } from "@/components/market-insights"
 import { HugeiconsIcon } from "@hugeicons/react"
 import { SourceCodeIcon, Link01Icon, Bookmark01Icon, ArrowDown01Icon } from "@hugeicons/core-free-icons"
 import { Button } from "@/components/ui/button"
@@ -19,7 +20,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const event = events[0]
   if (!event) return { title: "Event not found" }
   return {
-    title: `${event.title} | Prediction Market Starter Kit`,
+    title: `${event.title} | Kakupoly`,
     description: event.description?.slice(0, 160),
   }
 }
@@ -66,12 +67,19 @@ export default async function EventPage({ params }: Props) {
     )
   ).filter((m): m is NonNullable<typeof m> => m !== null)
 
+  // Use the first market and its price history for the news section
+  const primaryMarket = sortedMarkets[0] ?? null
+  const primaryPriceHistory = chartMarkets[0]?.data ?? []
+
   const firstTag = tags[0]
   const relatedEvents = firstTag
     ? (await getEvents({ tag_id: firstTag.id, active: true, closed: false, limit: 6, order: "volume24hr", ascending: false }))
         .filter((e) => e.id !== event.id)
         .slice(0, 5)
     : []
+
+  const isBasketball = isBasketballEvent(event.title, tags)
+  const teams = extractTeams(event.title)
 
   return (
     <div className="mx-auto max-w-[90rem] px-6 py-8">
@@ -113,17 +121,23 @@ export default async function EventPage({ params }: Props) {
           </div>
         </div>
 
-        {(() => {
-          const teams = extractTeams(event.title)
-          return (
-            <ChartLiveToggle
-              chartMarkets={chartMarkets}
-              isBasketball={isBasketballEvent(event.title, tags)}
-              homeTeam={teams?.home}
-              awayTeam={teams?.away}
-            />
-          )
-        })()}
+        {isBasketball ? (
+          <ChartLiveToggle
+            chartMarkets={chartMarkets}
+            isBasketball={true}
+            homeTeam={teams?.home}
+            awayTeam={teams?.away}
+          />
+        ) : (
+          <MarketInsights
+            chartMarkets={chartMarkets}
+            primaryMarket={primaryMarket}
+            primaryPriceHistory={primaryPriceHistory}
+            createdAt={event.createdAt}
+            eventTitle={event.title}
+            marketLabels={chartMarkets.map((m) => m.label)}
+          />
+        )}
 
         <Collapsible className="my-2" defaultOpen>
           <Card className="p-3.5">

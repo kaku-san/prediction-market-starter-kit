@@ -1,4 +1,5 @@
 const GAMMA_BASE_URL = "https://gamma-api.polymarket.com"
+const REQUEST_TIMEOUT_MS = 8000
 
 export interface Market {
   id: string
@@ -66,6 +67,24 @@ function buildQuery(params: Record<string, string | number | boolean | undefined
   return "?" + entries.map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join("&")
 }
 
+async function fetchJson<T>(url: string, init: RequestInit = {}): Promise<T | null> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+
+  try {
+    const res = await fetch(url, { ...init, signal: controller.signal })
+    if (!res.ok) return null
+    return (await res.json()) as T
+  } catch (error) {
+    if (error instanceof Error && error.name !== "AbortError") {
+      console.error(`Request failed for ${url}: ${error.message}`)
+    }
+    return null
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 export async function getEvents(params: {
   active?: boolean
   closed?: boolean
@@ -79,15 +98,10 @@ export async function getEvents(params: {
   series_id?: string
 } = {}): Promise<Event[]> {
   const query = buildQuery(params)
-  const res = await fetch(`${GAMMA_BASE_URL}/events${query}`, {
+  const data = await fetchJson<Event[]>(`${GAMMA_BASE_URL}/events${query}`, {
     next: { revalidate: 60 },
   })
-
-  if (!res.ok) {
-    throw new Error(`Gamma API error: ${res.status} ${res.statusText}`)
-  }
-
-  return res.json()
+  return data ?? []
 }
 
 export async function getPriceHistory(
@@ -96,23 +110,16 @@ export async function getPriceHistory(
   fidelity: number = 60
 ): Promise<PricePoint[]> {
   const query = buildQuery({ market: tokenId, interval, fidelity })
-  const res = await fetch(`https://clob.polymarket.com/prices-history${query}`, {
+  const data = await fetchJson<{ history?: PricePoint[] }>(`https://clob.polymarket.com/prices-history${query}`, {
     next: { revalidate: 300 },
   })
-
-  if (!res.ok) return []
-
-  const data = await res.json()
-  return data.history ?? []
+  return data?.history ?? []
 }
 
 export async function searchEvents(query: string, limit = 5): Promise<Event[]> {
   const q = buildQuery({ q: query, limit_per_type: limit, events_status: "active" })
-  const res = await fetch(`${GAMMA_BASE_URL}/public-search${q}`, {
+  const data = await fetchJson<{ events?: Event[] }>(`${GAMMA_BASE_URL}/public-search${q}`, {
     next: { revalidate: 0 },
   })
-
-  if (!res.ok) return []
-  const data = await res.json()
-  return data.events ?? []
+  return data?.events ?? []
 }

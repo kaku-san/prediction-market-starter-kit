@@ -7,6 +7,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from "@/components/ui/table"
 import { Spinner } from "@/components/ui/spinner"
 import { getPositions, getClosedPositions, getActivity } from "@/lib/data-api"
+import { useReadyTimeout } from "@/hooks/use-ready-timeout"
+import { usePrivyConfig } from "@/components/privy-provider"
 import { deriveSafeAddress } from "@/lib/polymarket/relayer"
 import type { Position, ClosedPosition, Activity } from "@/lib/data-api"
 
@@ -160,6 +162,31 @@ function ActivityTable({ activities }: { activities: Activity[] }) {
 }
 
 export function PortfolioPositions() {
+  const { enabled } = usePrivyConfig()
+
+  if (!enabled) {
+    return <EmptyState message="Sign in is disabled until NEXT_PUBLIC_PRIVY_APP_ID is configured." />
+  }
+
+  return <PrivyPortfolioPositions />
+}
+
+function PrivyPortfolioPositions() {
+  const { ready } = usePrivy()
+  const timedOut = useReadyTimeout(ready)
+
+  if (!ready) {
+    if (timedOut) {
+      return <EmptyState message="Privy did not initialize. Check NEXT_PUBLIC_PRIVY_APP_ID and the allowed origins for this local URL." />
+    }
+
+    return <div className="flex justify-center py-16"><Spinner className="size-6" /></div>
+  }
+
+  return <PortfolioPositionsReady />
+}
+
+function PortfolioPositionsReady() {
   const { user } = usePrivy()
   const eoaAddr = user?.wallet?.address
   const walletAddr = eoaAddr ? deriveSafeAddress(eoaAddr) : undefined
@@ -172,16 +199,27 @@ export function PortfolioPositions() {
   useEffect(() => {
     if (!walletAddr) return
 
-    setLoading(true)
+    let cancelled = false
+    queueMicrotask(() => {
+      if (!cancelled) setLoading(true)
+    })
+
     Promise.all([
       getPositions(walletAddr),
       getClosedPositions(walletAddr),
       getActivity(walletAddr),
     ]).then(([pos, cls, act]) => {
+      if (cancelled) return
       setPositions(pos)
       setClosed(cls)
       setActivities(act)
-    }).finally(() => setLoading(false))
+    }).finally(() => {
+      if (!cancelled) setLoading(false)
+    })
+
+    return () => {
+      cancelled = true
+    }
   }, [walletAddr])
 
   if (!walletAddr) {

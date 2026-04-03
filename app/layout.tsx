@@ -12,8 +12,8 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-sans" })
 const fontMono = Geist_Mono({ subsets: ["latin"], variable: "--font-mono" })
 
 export const metadata: Metadata = {
-  title: "Prediction Market Starter Kit",
-  description: "Open-source prediction market starter kit",
+  title: "Kakupoly",
+  description: "Prediction markets with AI-powered news insights",
 }
 
 export default function RootLayout({

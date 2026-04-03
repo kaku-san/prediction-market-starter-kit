@@ -29,7 +29,9 @@ export function useUsdcBalance(address: string | undefined) {
     if (!address) return
 
     let cancelled = false
-    setLoading(true)
+    queueMicrotask(() => {
+      if (!cancelled) setLoading(true)
+    })
 
     client
       .readContract({
