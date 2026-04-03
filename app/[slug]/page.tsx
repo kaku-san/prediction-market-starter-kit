@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation"
 import type { Metadata } from "next"
 import { getEvents, getPriceHistory } from "@/lib/gamma"
-import { MarketChart } from "@/components/market-chart"
 import { HugeiconsIcon } from "@hugeicons/react"
 import { SourceCodeIcon, Link01Icon, Bookmark01Icon, ArrowDown01Icon } from "@hugeicons/core-free-icons"
 import { Button } from "@/components/ui/button"
@@ -9,6 +8,8 @@ import { Card } from "@/components/ui/card"
 import { EventTrading } from "@/components/event-trading"
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible"
 import { parseYesPrice } from "@/lib/prices"
+import { isBasketballEvent, extractTeams } from "@/lib/sports"
+import { ChartLiveToggle } from "@/components/chart-live-toggle"
 
 type Props = { params: Promise<{ slug: string }> }
 
@@ -112,11 +113,11 @@ export default async function EventPage({ params }: Props) {
           </div>
         </div>
 
-        {chartMarkets.length > 0 && (
-          <div className="mt-6">
-            <MarketChart markets={chartMarkets} />
-          </div>
-        )}
+        <ChartLiveToggle
+          chartMarkets={chartMarkets}
+          isBasketball={isBasketballEvent(event.title, tags)}
+          {...(extractTeams(event.title) ?? {})}
+        />
 
         <Collapsible className="my-2" defaultOpen>
           <Card className="p-3.5">
